@@ -1,0 +1,77 @@
+version: '3.8'
+
+services:
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf
+      - ./ssl:/etc/ssl
+    depends_on:
+      - api
+      - frontend
+
+  api:
+    build: ./backend
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://domain_user:temp12345@postgres:5432/domain_extractor
+      - REDIS_URL=redis://redis:6379
+      - CELERY_BROKER_URL=redis://redis:6379
+      - SECRET_KEY=your-secret-key-change-in-production
+      - ENVIRONMENT=development
+    depends_on:
+      - postgres
+      - redis
+    volumes:
+      - ./uploads:/app/uploads
+      - ./results:/app/results
+    ports:
+      - "8000:8000"
+
+  worker:
+    build: ./backend
+    command: celery -A app.celery worker --loglevel=info --concurrency=4
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://domain_user:temp12345@postgres:5432/domain_extractor
+      - REDIS_URL=redis://redis:6379
+      - CELERY_BROKER_URL=redis://redis:6379
+      - SECRET_KEY=your-secret-key-change-in-production
+    depends_on:
+      - postgres
+      - redis
+    volumes:
+      - ./uploads:/app/uploads
+      - ./results:/app/results
+
+  postgres:
+    image: postgres:14
+    environment:
+      - POSTGRES_DB=domain_extractor
+      - POSTGRES_USER=domain_user
+      - POSTGRES_PASSWORD=temp12345
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "5432:5432"
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+
+  frontend:
+    build: ./frontend
+    environment:
+      - VUE_APP_API_URL=http://localhost/api
+    ports:
+      - "3000:80"
+
+volumes:
+  postgres_data:
+  redis_data:
