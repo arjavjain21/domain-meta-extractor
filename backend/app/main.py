@@ -7,6 +7,7 @@ import os
 from app.core.config import settings
 from app.api.v1.api import api_router
 from app.core.database import engine, Base
+from app.middleware.analytics import AnalyticsMiddleware, RealTimeMetricsMiddleware, ErrorTrackingMiddleware
 
 # Create database tables
 async def create_tables():
@@ -28,6 +29,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Add analytics middleware (order matters - analytics before error tracking)
+app.add_middleware(AnalyticsMiddleware)
+app.add_middleware(RealTimeMetricsMiddleware)
+app.add_middleware(ErrorTrackingMiddleware)
 
 # Include API router
 app.include_router(api_router, prefix=settings.API_V1_STR)
