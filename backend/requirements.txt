@@ -33,3 +33,41 @@ numpy==1.24.3  # For statistical calculations
 scipy==1.11.4  # For advanced analytics
 aiosmtplib==3.0.1  # For email alerts
 jinja2==3.1.2  # For alert templates
+
+# Phase 4: Advanced Features dependencies
+# Machine Learning
+scikit-learn==1.3.2  # ML algorithms
+spacy==3.7.2  # NLP processing
+mlflow==2.8.1  # Model management
+joblib==1.3.2  # Model serialization
+nltk==3.8.1  # Text processing
+textblob==0.17.1  # Sentiment analysis
+
+# Search Engine
+elasticsearch==8.11.0  # Full-text search
+elasticsearch-dsl==8.11.0  # Query builder
+
+# Security
+authlib==1.2.1  # OAuth2/OIDC support
+python-multipart==0.0.6  # Form handling
+two-factor-auth==1.0.0  # MFA support
+
+# Export & Reporting
+reportlab==4.0.7  # PDF generation
+weasyprint==60.1  # HTML to PDF
+xlsxwriter==3.1.9  # Excel files
+plotly==5.17.0  # Data visualization
+
+# Multi-tenancy
+sqlalchemy-utils==0.41.1  # Database utilities
+stripe==7.8.0  # Payment processing
+
+# Additional utilities
+email-validator==2.1.0  # Email validation
+python-dateutil==2.8.2  # Date utilities
+pytz==2023.3  # Timezone handling
+cryptography==41.0.8  # Advanced crypto
+pillow==10.1.0  # Image processing
+requests==2.31.0  # HTTP requests
+whois==0.9.27  # Domain whois lookup
+dnspython==2.4.2  # DNS resolution

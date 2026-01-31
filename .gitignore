@@ -1,85 +1,79 @@
+# Environment files
+.env
+.env.*
+*.env
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Uploads and results
+backend/uploads/*
+backend/results/*
+!backend/uploads/.gitkeep
+!backend/results/.gitkeep
+
+# Test CSVs
+*.csv
+!*.csv.example
+
 # Python
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 .Python
-env/
 venv/
-ENV/
-env.bak/
-venv.bak/
-
-# Virtual environments
-.env
-.venv
-env/
-venv/
-ENV/
-env.bak/
-venv.bak/
-
-# IDEs
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-
-# OS
-.DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
-Thumbs.db
+venv*/
+*.venv
+*.egg-info/
+dist/
+build/
 
 # Logs
 *.log
 logs/
 
-# Database
-*.db
-*.sqlite3
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
 
-# Uploads and results
-uploads/*
-!uploads/.gitkeep
-results/*
-!results/.gitkeep
+# OS
+.DS_Store
+Thumbs.db
 
-# Node.js
-node_modules/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
+# Old/backup apps
+backend/*_app.py
+backend/*_extractor.py
+backend/app_main_simple.py
+backend/async_fast_app.py
+backend/csv_extractor.py
+backend/domain_extractor_*.py
+backend/enterprise_extractor.py
+backend/fluent_*.py
+backend/improved_*.py
+backend/modern_*.py
+backend/optimized_*.py
+backend/process_*.py
+backend/reliable_*.py
+backend/simple_*.py
+backend/convert_*.py
+backend/analyze_*.py
+backend/debug_*.py
+backend/migrate_*.py
+!backend/app.py
 
-# Build outputs
-dist/
-build/
+# Test files (keep organized tests)
+backend/test_*.py
+!backend/test_clay_api.py
 
-# Docker
-.dockerignore
-
-# SSL certificates
-ssl/
-*.pem
-*.key
-*.crt
-
-# Environment variables
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
-
-# Test coverage
-coverage/
-.nyc_output/
-.coverage
-htmlcov/
-
-# Alembic
-alembic/versions/*.py
-!alembic/versions/__init__.py
+# Old markdown docs (keep new ones)
+DOMAIN_INCLUSION_FIX_SUMMARY.md
+EXPORT_REPORTING_SUMMARY.md
+PHASE4_PLAN.md
+PHASE4_PROGRESS.md
+PROGRESS.md
+TEST_RESULTS.md

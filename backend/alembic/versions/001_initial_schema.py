@@ -61,8 +61,7 @@ def upgrade() -> None:
         sa.Column('completed_at', sa.DateTime(timezone=True), nullable=True),
         sa.Column('created_by', sa.String(length=100), nullable=True),
         sa.Column('config', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
-        sa.PrimaryKeyConstraint('id'),
-        sa.Column('id').unique_argument('id')
+        sa.PrimaryKeyConstraint('id')
     )
 
     # Create indexes for jobs table

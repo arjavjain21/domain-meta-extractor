@@ -33,7 +33,26 @@ class ExtractionService:
 
             # Read CSV file
             df = pd.read_csv(job.file_path)
-            domains = df['domain'].dropna().unique().tolist()
+            
+            # Normalize column names to lowercase (matching job_service.py)
+            df.columns = df.columns.str.lower()
+            
+            # Find domain column (could be 'domain', 'email', 'website', 'url', etc.)
+            domain_col = None
+            for col in df.columns:
+                if any(k in col.lower() for k in ['domain', 'email', 'website', 'url', 'address']):
+                    domain_col = col
+                    break
+            
+            if not domain_col:
+                # Try to use 'domain' column, or first column as fallback
+                if 'domain' in df.columns:
+                    domain_col = 'domain'
+                else:
+                    domain_col = df.columns[0]
+            
+            # Extract unique domains for processing
+            domains = df[domain_col].dropna().unique().tolist()
 
             # Get concurrency from job config
             concurrency = job.config.get('concurrency', settings.DEFAULT_CONCURRENCY) if job.config else settings.DEFAULT_CONCURRENCY
@@ -64,8 +83,8 @@ class ExtractionService:
             # Create job-domain relationships
             await self._create_job_domain_relationships(job, domains, all_results)
 
-            # Generate results file
-            result_file_path = await self._generate_results_file(job, df, all_results)
+            # Generate results file (pass domain_col to ensure correct column is used)
+            result_file_path = await self._generate_results_file(job, df, all_results, domain_col)
 
             # Complete job
             job.result_file_path = result_file_path
@@ -129,20 +148,38 @@ class ExtractionService:
         self,
         job: Job,
         original_df: pd.DataFrame,
-        extracted_domains: List[Domain]
+        extracted_domains: List[Domain],
+        domain_col: str = 'domain'
     ) -> str:
-        """Generate results CSV file"""
+        """Generate results CSV file - ensures ALL rows from original CSV are included"""
         # Create mapping of normalized domain to domain object
         domain_map = {d.normalized_domain: d for d in extracted_domains}
 
         # Create results dataframe matching original order
         results = []
+        
+        from app.services.extraction.extractors import DomainUtils
 
         for _, row in original_df.iterrows():
-            original_domain = str(row['domain']).strip()
+            # Get original domain value from the correct column
+            original_domain = str(row.get(domain_col, '')).strip() if domain_col in row else ''
+            
+            # If domain column is missing or empty, still include the row
+            if not original_domain:
+                result = {
+                    'domain': '',
+                    'meta_title': '',
+                    'meta_description': '',
+                    'extraction_method': 'missing_domain',
+                    'status_code': None,
+                    'extraction_time': None,
+                    'from_cache': False,
+                    'error_message': 'Domain column missing or empty'
+                }
+                results.append(result)
+                continue
 
             # Normalize domain to find in our results
-            from app.services.extraction.extractors import DomainUtils
             normalized = DomainUtils.normalize_domain(original_domain)
 
             if normalized and normalized in domain_map:
@@ -158,15 +195,17 @@ class ExtractionService:
                     'error_message': domain_data.error_message or ''
                 }
             else:
+                # Domain was in original CSV but not successfully processed
+                # Still include it in results with error info
                 result = {
                     'domain': original_domain,
                     'meta_title': '',
                     'meta_description': '',
-                    'extraction_method': 'not_processed',
+                    'extraction_method': 'not_processed' if normalized else 'invalid_domain',
                     'status_code': None,
                     'extraction_time': None,
                     'from_cache': False,
-                    'error_message': 'Domain not processed or invalid'
+                    'error_message': 'Domain not processed or invalid' if normalized else 'Domain failed normalization'
                 }
 
             results.append(result)
