@@ -164,11 +164,56 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 # ==============
 
 def normalize_domain(domain: str) -> str:
-    """Normalize domain name to lowercase without www"""
-    domain = domain.strip().lower()
-    if domain.startswith('www.'):
-        domain = domain[4:]
-    return domain
+    """
+    Normalize domain name to lowercase without protocol or www
+
+    Handles:
+    - https://example.com → example.com
+    - http://www.example.com → example.com
+    - https://example.com/path → example.com
+    - www.example.com → example.com
+    - example.com/ → example.com
+    - example.com:8080 → example.com
+    """
+    try:
+        from urllib.parse import urlparse
+
+        # Strip whitespace
+        domain = domain.strip()
+
+        # If it looks like a URL, parse it properly
+        if '://' in domain or '/' in domain:
+            parsed = urlparse(domain if '://' in domain else f'http://{domain}')
+            domain = parsed.netloc or parsed.path
+        else:
+            # Remove any path after first slash
+            domain = domain.split('/')[0]
+
+        # Remove port if present
+        if ':' in domain:
+            domain = domain.split(':')[0]
+
+        # Convert to lowercase
+        domain = domain.lower()
+
+        # Remove www. prefix
+        if domain.startswith('www.'):
+            domain = domain[4:]
+
+        # Remove trailing slash
+        domain = domain.rstrip('/')
+
+        return domain
+
+    except Exception:
+        # If parsing fails, do basic cleanup
+        domain = domain.strip().lower()
+        domain = domain.split('://')[-1]  # Remove protocol
+        domain = domain.split('/')[0]  # Remove path
+        if domain.startswith('www.'):
+            domain = domain[4:]
+        domain = domain.rstrip('/')
+        return domain
 
 def is_valid_domain(domain: str) -> bool:
     """Check if domain is valid"""
