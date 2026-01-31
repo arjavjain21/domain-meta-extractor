@@ -590,7 +590,7 @@ async def health_check():
 # CLAY API ENDPOINTS
 # ==============
 
-@app.get("/api/v1/domain/{domain}")
+@app.get("/api/v1/domain")
 async def get_domain_metadata(domain: str):
     """
     Get comprehensive metadata for a single domain.
@@ -613,8 +613,8 @@ async def get_domain_metadata(domain: str):
         - extraction_time: Time taken in seconds
 
     Example:
-        GET /api/v1/domain/google.com
-        GET /api/v1/domain/https://example.com
+        GET /api/v1/domain?domain=google.com
+        GET /api/v1/domain?domain=https://example.com
     """
     try:
         # Normalize and validate domain

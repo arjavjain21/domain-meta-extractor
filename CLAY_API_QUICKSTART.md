@@ -4,7 +4,7 @@
 
 ### Single Domain Lookup
 ```bash
-curl "https://metadata.eagleinfoservice.com/api/v1/domain/example.com"
+curl "https://metadata.eagleinfoservice.com/api/v1/domain?domain=example.com"
 ```
 
 ### Batch Domain Lookup
@@ -37,7 +37,7 @@ curl "https://metadata.eagleinfoservice.com/api/v1/batch?domains=google.com,exam
 
 ### 1. Add HTTP Enrichment
 - **Method:** GET
-- **URL:** `https://metadata.eagleinfoservice.com/api/v1/domain/{{YourDomainColumn}}`
+- **URL:** `https://metadata.eagleinfoservice.com/api/v1/domain?domain={{YourDomainColumn}}`
 
 ### 2. Map Fields
 - `meta_title` → Domain Title
@@ -76,7 +76,7 @@ See [CLAY_API_DOCUMENTATION.md](./CLAY_API_DOCUMENTATION.md) for complete guide 
 
 ```bash
 # Test single domain
-curl "https://metadata.eagleinfoservice.com/api/v1/domain/example.com" | jq
+curl "https://metadata.eagleinfoservice.com/api/v1/domain?domain=example.com" | jq
 
 # Test batch
 curl "https://metadata.eagleinfoservice.com/api/v1/batch?domains=google.com,example.com,github.com" | jq

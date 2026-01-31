@@ -12,7 +12,7 @@ from typing import Dict, Any
 BASE_URL = "http://127.0.0.1:8003"
 
 async def test_single_domain():
-    """Test GET /api/v1/domain/{domain}"""
+    """Test GET /api/v1/domain?domain={domain}"""
     print("\n" + "="*60)
     print("TEST 1: Single Domain Lookup")
     print("="*60)
@@ -21,7 +21,7 @@ async def test_single_domain():
         ("google.com", "Valid domain"),
         ("example.com", "Simple domain"),
         ("https://github.com", "Domain with protocol"),
-        ("invalid-domain", "Invalid domain should return 400")
+        ("invalid-domain", "Invalid domain should return error")
     ]
 
     async with aiohttp.ClientSession() as session:
@@ -30,7 +30,7 @@ async def test_single_domain():
             print(f"   Domain: {domain}")
 
             try:
-                async with session.get(f"{BASE_URL}/api/v1/domain/{domain}") as response:
+                async with session.get(f"{BASE_URL}/api/v1/domain", params={"domain": domain}) as response:
                     status = response.status
                     data = await response.json()
 
@@ -43,7 +43,10 @@ async def test_single_domain():
                             print(f"   ⏱️  Time: {data.get('extraction_time', 'N/A'):.3f}s")
                     else:
                         print(f"   ⚠️  Status: {status}")
-                        print(f"   📄 Detail: {data.get('detail', 'N/A')}")
+                        if data.get('detail'):
+                            print(f"   📄 Detail: {data.get('detail', 'N/A')}")
+                        elif data.get('error_message'):
+                            print(f"   📄 Error: {data.get('error_message', 'N/A')}")
 
             except Exception as e:
                 print(f"   ❌ Error: {str(e)}")
@@ -99,7 +102,7 @@ async def test_cache_performance():
         # First request
         print("\n1️⃣  First request (should hit web):")
         try:
-            async with session.get(f"{BASE_URL}/api/v1/domain/{domain}") as response:
+            async with session.get(f"{BASE_URL}/api/v1/domain", params={"domain": domain}) as response:
                 data1 = await response.json()
                 method1 = data1.get('extraction_method', 'unknown')
                 time1 = data1.get('extraction_time', 0)
@@ -115,7 +118,7 @@ async def test_cache_performance():
         # Second request
         print("\n2️⃣  Second request (should hit cache):")
         try:
-            async with session.get(f"{BASE_URL}/api/v1/domain/{domain}") as response:
+            async with session.get(f"{BASE_URL}/api/v1/domain", params={"domain": domain}) as response:
                 data2 = await response.json()
                 method2 = data2.get('extraction_method', 'unknown')
                 time2 = data2.get('extraction_time', 0)
@@ -153,7 +156,7 @@ async def test_response_structure():
 
     async with aiohttp.ClientSession() as session:
         try:
-            async with session.get(f"{BASE_URL}/api/v1/domain/example.com") as response:
+            async with session.get(f"{BASE_URL}/api/v1/domain", params={"domain": "example.com"}) as response:
                 data = await response.json()
 
                 print("\n📋 Checking expected fields:")
