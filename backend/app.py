@@ -52,6 +52,33 @@ Base = declarative_base()
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
 redis_client = None
 
+# Shared HTTP session (pooled connections: one TLS handshake per host instead of per request)
+http_session: aiohttp.ClientSession = None
+
+# Realistic browser headers (UA-only gets lazy-bot-checked on some sites)
+BROWSER_HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+    'Accept-Language': 'en-US,en;q=0.9',
+    'Accept-Encoding': 'gzip, deflate, br',
+    'Connection': 'keep-alive',
+    'Upgrade-Insecure-Requests': '1',
+    'Sec-Fetch-Dest': 'document',
+    'Sec-Fetch-Mode': 'navigate',
+    'Sec-Fetch-Site': 'none',
+    'Sec-Fetch-User': '?1',
+}
+
+# Usage counters (best-effort; never break a request over analytics)
+async def bump_stat(*parts):
+    try:
+        r = await get_redis()
+        key = "stats:metadata_api:" + datetime.utcnow().strftime("%Y%m%d") + ":" + ":".join(parts)
+        await r.incr(key)
+        await r.expire(key, 86400 * 90)  # 90-day retention
+    except Exception:
+        pass
+
 # Templates setup
 templates = Jinja2Templates(directory="templates")
 
@@ -227,6 +254,17 @@ async def get_redis():
         redis_client = await redis.from_url(REDIS_URL)
     return redis_client
 
+async def get_http_session() -> aiohttp.ClientSession:
+    """Get shared pooled HTTP session (created lazily, reused across requests)"""
+    global http_session
+    if http_session is None or http_session.closed:
+        http_session = aiohttp.ClientSession(
+            timeout=aiohttp.ClientTimeout(total=30),
+            headers=BROWSER_HEADERS,
+            connector=aiohttp.TCPConnector(limit=100, limit_per_host=10, ttl_dns_cache=300),
+        )
+    return http_session
+
 async def get_db():
     """Get database session"""
     async with AsyncSessionLocal() as session:
@@ -239,20 +277,74 @@ async def get_db():
 # SERVICES
 # ==============
 
+async def _fetch_and_parse(url: str, timeout: aiohttp.ClientTimeout, verify_ssl: bool = True):
+    """Fetch URL and parse metadata. Returns (data, status_code): data is a parsed
+    dict on HTTP 200, else None. Raises on connection/timeout errors (caller falls back)."""
+    session = await get_http_session()
+    async with session.get(url, timeout=timeout, allow_redirects=True, ssl=verify_ssl) as response:
+        status_code = response.status
+        if status_code != 200:
+            return None, status_code
+        html = await response.text()
+        soup = BeautifulSoup(html, 'html.parser')
+
+        data = {
+            "status_code": status_code,
+            "meta_title": soup.title.string.strip() if soup.title and soup.title.string else None,
+            "meta_description": None,
+            "meta_keywords": None,
+            "h1_tag": None,
+            "first_paragraph": None
+        }
+
+        desc_meta = soup.find('meta', attrs={'name': 'description'})
+        if desc_meta:
+            data["meta_description"] = desc_meta.get('content', '').strip()
+
+        keywords_meta = soup.find('meta', attrs={'name': 'keywords'})
+        if keywords_meta:
+            data["meta_keywords"] = keywords_meta.get('content', '').strip()
+
+        h1_tag = soup.find('h1')
+        if h1_tag:
+            data["h1_tag"] = h1_tag.get_text().strip()
+
+        p_tag = soup.find('p')
+        if p_tag:
+            data["first_paragraph"] = p_tag.get_text().strip()[:200]
+
+        return data, status_code
+
+def _last_error_text(pending_error: Optional[str]) -> str:
+    return pending_error or "All extraction methods failed"
+
+NEGATIVE_TTL = 86400  # 24h negative cache
+
 async def extract_metadata(domain: str) -> Dict[str, Any]:
-    """Extract metadata from a domain"""
+    """Extract metadata from a domain.
+
+    Strategy (failure-path fallbacks only — successful domains behave exactly as before):
+      1. https://{apex}        (20s: connect 5s)  — primary, unchanged behavior
+      2. https://www.{apex}    (14s)               — recovers SSL name-mismatch + some dead apex DNS
+      3. http://{apex}         (12s)               — recovers https-only timeouts / no-TLS sites
+      4. https://{apex} no-verify (10s)            — recovers self-signed / broken-cert sites
+
+    Caching:
+      - Success: Redis domain:{n} 30d (unchanged, same response shape)
+      - Failure: Redis failed:domain:{n} 24h — same error response shape, skips re-scraping
+    """
     start_time = time.time()
     normalized = normalize_domain(domain)
 
     try:
-        # Check Redis cache first
         redis = await get_redis()
+
+        # --- Positive cache (unchanged key + shape) ---
         cache_key = f"domain:{normalized}"
         cached_data = await redis.get(cache_key)
-
         if cached_data:
             data = json.loads(cached_data)
-            logger.info(f"Cache hit for {domain}")
+            await bump_stat("cache_hit")
             return {
                 "domain": domain,
                 "normalized_domain": normalized,
@@ -261,51 +353,38 @@ async def extract_metadata(domain: str) -> Dict[str, Any]:
                 "extraction_time": time.time() - start_time
             }
 
-        # Extract from web
-        url = f"https://{domain}"
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-        }
+        # --- Negative cache (new): dead/blocked domains skip re-scraping for 24h ---
+        neg_key = f"failed:domain:{normalized}"
+        neg_cached = await redis.get(neg_key)
+        if neg_cached:
+            data = json.loads(neg_cached)
+            await bump_stat("negative_cache_hit")
+            return {
+                "domain": domain,
+                "normalized_domain": normalized,
+                **data,
+                "extraction_method": data.get("extraction_method", "error") + "_cached",
+                "extraction_time": time.time() - start_time
+            }
 
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
-            async with session.get(url, headers=headers, allow_redirects=True) as response:
-                status_code = response.status
+        await bump_stat("request")
 
-                if status_code == 200:
-                    html = await response.text()
-                    soup = BeautifulSoup(html, 'html.parser')
+        # --- Attempt chain ---
+        attempts = [
+            (f"https://{normalized}", aiohttp.ClientTimeout(total=20, connect=5), True, "web_extraction"),
+            (f"https://www.{normalized}", aiohttp.ClientTimeout(total=14, connect=5), True, "web_extraction_www"),
+            (f"http://{normalized}", aiohttp.ClientTimeout(total=12, connect=5), True, "web_extraction_http"),
+            (f"https://{normalized}", aiohttp.ClientTimeout(total=10, connect=5), False, "web_extraction_noverify"),
+        ]
 
-                    # Extract metadata
-                    data = {
-                        "status_code": status_code,
-                        "meta_title": soup.title.string.strip() if soup.title else None,
-                        "meta_description": None,
-                        "meta_keywords": None,
-                        "h1_tag": None,
-                        "first_paragraph": None
-                    }
+        last_error = None
+        last_status = None
 
-                    # Meta description
-                    desc_meta = soup.find('meta', attrs={'name': 'description'})
-                    if desc_meta:
-                        data["meta_description"] = desc_meta.get('content', '').strip()
-
-                    # Meta keywords
-                    keywords_meta = soup.find('meta', attrs={'name': 'keywords'})
-                    if keywords_meta:
-                        data["meta_keywords"] = keywords_meta.get('content', '').strip()
-
-                    # H1 tag
-                    h1_tag = soup.find('h1')
-                    if h1_tag:
-                        data["h1_tag"] = h1_tag.get_text().strip()
-
-                    # First paragraph
-                    p_tag = soup.find('p')
-                    if p_tag:
-                        data["first_paragraph"] = p_tag.get_text().strip()[:200]
-
-                    # Cache in Redis for 30 days
+        for url, timeout, verify, method in attempts:
+            try:
+                data, status = await _fetch_and_parse(url, timeout, verify)
+                if data is not None:
+                    # Success: cache 30d under the SAME key/shape as before
                     await redis.setex(cache_key, 2592000, json.dumps({
                         "status_code": data["status_code"],
                         "meta_title": data["meta_title"],
@@ -314,24 +393,50 @@ async def extract_metadata(domain: str) -> Dict[str, Any]:
                         "h1_tag": data["h1_tag"],
                         "first_paragraph": data["first_paragraph"]
                     }))
-
-                    data["extraction_method"] = "web_extraction"
+                    data["extraction_method"] = method
                     data["extraction_time"] = time.time() - start_time
-
+                    await bump_stat("success", method)
                     return {
                         "domain": domain,
                         "normalized_domain": normalized,
                         **data
                     }
-                else:
-                    return {
-                        "domain": domain,
-                        "normalized_domain": normalized,
-                        "status_code": status_code,
-                        "error_message": f"HTTP {status_code}",
-                        "extraction_method": "http_error",
-                        "extraction_time": time.time() - start_time
-                    }
+                # Non-200 response — try next method, but remember the status
+                last_error = f"HTTP {status}"
+                last_status = status
+            except Exception as e:
+                last_error = str(e)
+                continue
+
+        # --- All attempts failed: negative-cache the error response (same shape as old failures) ---
+        if last_status is not None:
+            error_result = {
+                "domain": domain,
+                "normalized_domain": normalized,
+                "status_code": last_status,
+                "error_message": f"HTTP {last_status}",
+                "extraction_method": "http_error",
+                "extraction_time": time.time() - start_time
+            }
+        else:
+            error_result = {
+                "domain": domain,
+                "normalized_domain": normalized,
+                "error_message": _last_error_text(last_error),
+                "extraction_method": "error",
+                "extraction_time": time.time() - start_time
+            }
+        try:
+            await redis.setex(neg_key, NEGATIVE_TTL, json.dumps({
+                "error_message": error_result["error_message"],
+                "extraction_method": error_result["extraction_method"],
+                "status_code": error_result.get("status_code"),
+            }))
+        except Exception:
+            pass
+        await bump_stat("failure")
+        logger.warning(f"Extraction failed for {domain}: {error_result['error_message'][:120]}")
+        return error_result
 
     except Exception as e:
         logger.error(f"Error extracting metadata for {domain}: {str(e)}")
@@ -666,6 +771,7 @@ async def get_domain_metadata(domain: str):
         normalized = normalize_domain(domain)
 
         if not is_valid_domain(normalized):
+            await bump_stat("invalid_domain")
             raise HTTPException(
                 status_code=400,
                 detail=f"Invalid domain format: {domain}"
@@ -734,6 +840,7 @@ async def batch_domain_metadata(domains: str):
                     result = await extract_metadata(normalized)
                     results.append(result)
                 else:
+                    await bump_stat("invalid_domain")
                     errors.append({
                         "domain": domain,
                         "error": "Invalid domain format"
